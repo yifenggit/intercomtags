@@ -1,0 +1,53 @@
+[package]
+name = "intercomtags"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# GUI框架
+eframe = "0.33"
+egui = "0.33"
+egui_extras = { version = "0.33", features = ["all_loaders"] }
+
+# 异步运行时
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+# HTTP客户端
+reqwest = { version = "0.12", features = ["json"] }
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 文件处理
+calamine = "0.24"
+csv = "1"
+
+# 文件对话框
+rfd = "0.15"
+
+# 日志
+log = "0.4"
+fern = "0.7"
+
+# 时间处理
+chrono = { version = "0.4", features = ["serde"] }
+
+# 错误处理
+anyhow = "1"
+thiserror = "1"
+
+# 并发
+parking_lot = "0.12"
+futures = "0.3"
+
+# 目录路径
+dirs = "5"
+
+# Excel导出
+rust_xlsxwriter = "0.84"
+
+[profile.release]
+opt-level = 2
+strip = true
+lto = true
