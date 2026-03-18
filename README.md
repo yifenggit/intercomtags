@@ -2,6 +2,36 @@
 
 基于 Rust + egui 的 macOS 桌面应用，用于批量给 Intercom 联系人打标签。
 
+## 系统要求
+
+- macOS 10.13 或更高版本
+- Intercom API Token
+
+## 安装
+
+### 从 .dmg 安装（推荐）
+
+1. 下载 `Intercom Tags Manager-x.x.x.dmg`
+2. 双击打开 DMG 文件
+3. 将应用拖拽到 `Applications` 文件夹
+4. 从启动台打开应用
+
+> ⚠️ 首次打开可能需要在"系统偏好设置 > 安全性与隐私"中允许运行
+
+### 从源码构建
+
+```bash
+# 克隆仓库
+git clone https://github.com/yourname/intercomtags.git
+cd intercomtags
+
+# 构建
+cargo build --release
+
+# 运行
+./target/release/intercomtags
+```
+
 ## 功能特性
 
 ### 1. 文件选择
@@ -76,26 +106,96 @@ user2@example.com,VIP
 ```
 文件中已包含标签信息
 
-## 编译
+## 开发
 
-### 开发版本
+### 环境要求
+
+- Rust 1.70+
+- macOS
+
+### 编译
+
 ```bash
+# 开发版本
 cargo build
+
+# 发布版本（优化编译）
+cargo build --release
 ```
 
-### 发布版本
+### 打包为 .dmg
+
 ```bash
-cargo build --release
+# 使用打包脚本
+./build-dmg.sh [版本号]
+
+# 示例
+./build-dmg.sh 1.0.0
+```
+
+输出文件位于 `dist/` 目录：
+- `Intercom Tags Manager.app` - macOS 应用
+- `Intercom Tags Manager-1.0.0.dmg` - 安装包
+
+### 项目结构
+
+```
+intercomtags/
+├── src/
+│   ├── main.rs         # 入口、GUI 初始化
+│   ├── app.rs          # 应用主逻辑
+│   ├── intercom.rs     # Intercom API 封装
+│   ├── file_parser.rs  # 文件解析（CSV/XLSX）
+│   └── config.rs       # 配置管理
+├── build-dmg.sh        # DMG 打包脚本
+├── Cargo.toml
+└── README.md
 ```
 
 ## 技术栈
 
-- **GUI框架**: egui 0.29 + eframe
+- **GUI框架**: egui 0.33 + eframe
 - **异步运行时**: tokio
 - **HTTP客户端**: reqwest
 - **文件解析**: calamine (Excel) + csv
 - **序列化**: serde + serde_json
 - **错误处理**: anyhow + thiserror
+
+## 数据存储
+
+| 类型 | 位置 |
+|------|------|
+| 配置文件 | `~/Library/Application Support/intercomtags/config.json` |
+| 日志文件 | `~/Library/Application Support/intercomtags/logs/` |
+| 导出文件 | 用户选择的目录 |
+
+## 常见问题
+
+### 1. API Token 无效
+
+确保使用正确的 Intercom Access Token：
+- 登录 Intercom → Settings → Developer → Authentication
+- 创建或复制 Access Token
+
+### 2. 找不到联系人
+
+- 确认邮箱地址正确
+- 确认联系人在当前 Workspace 中存在
+- 检查 API Token 权限
+
+### 3. 请求超时
+
+- 减少并发数（默认 5）
+- 检查网络连接
+- 查看日志获取详细错误信息
+
+### 4. 文件解析失败
+
+支持的文件格式：
+- CSV（UTF-8 编码）
+- XLSX（Excel 2007+）
+
+确保文件包含正确的列名：`email` 或 `email, tag`
 
 ## 与原 Go 版本的对比
 
@@ -110,12 +210,31 @@ cargo build --release
 
 ## 开发计划
 
+- [x] 图形界面
+- [x] 文件选择（CSV/XLSX）
+- [x] 手动输入邮箱
+- [x] 配置保存
+- [x] 并发控制
+- [x] 重试机制
+- [x] 日志记录
 - [ ] 断点续传功能
 - [ ] 导出结果到文件
 - [ ] 批量操作历史记录
-- [ ] Token验证功能
+- [ ] Token 验证功能
 - [ ] 暗色/亮色主题切换
+
+## 更新日志
+
+### v0.1.0
+- 初始版本
+- 支持批量给 Intercom 联系人打标签
+- 支持 CSV/XLSX 文件导入
+- 支持手动输入邮箱
 
 ## 许可证
 
 MIT License
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request！
