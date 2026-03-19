@@ -9,7 +9,7 @@ set -e
 APP_NAME="Intercom Tags Manager"
 EXECUTABLE_NAME="intercomtags"
 BUNDLE_ID="com.intercomtags.app"
-VERSION="${1:-0.1.1}"
+VERSION="${1:-0.1.2}"
 
 # 路径
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -220,10 +220,26 @@ impl IntercomTagsApp {
     fn do_stop_execution(&mut self) {
         self.should_stop.store(true, Ordering::SeqCst);
         self.is_running = false;
-        self.status_message = format!("已暂停 (已处理 {} 个)", self.processed_emails.len());
+        
+        let processed = self.processed_emails.len();
+        let success = self.success_count;
+        let failed = self.failed_count;
+        let total = match self.input_mode {
+            InputMode::File => self.file_emails.len(),
+            InputMode::Manual => self.parse_manual_emails().len(),
+        };
+        let remaining = total.saturating_sub(processed);
+        
+        self.status_message = format!(
+            "已暂停 | 已处理: {} | 成功: {} | 失败: {} | 剩余: {}",
+            processed, success, failed, remaining
+        );
         self.log_messages.push(LogMessage {
             level: LogLevel::Warn,
-            message: format!("用户暂停执行，已处理 {} 个邮箱", self.processed_emails.len()),
+            message: format!(
+                "用户暂停执行 | 已处理: {} | 成功: {} | 失败: {} | 剩余: {} / 总数: {}",
+                processed, success, failed, remaining, total
+            ),
             timestamp: chrono::Local::now(),
         });
     }
@@ -234,30 +250,34 @@ impl IntercomTagsApp {
             .add_filter("Excel files", &["xlsx", "xls"])
             .pick_file()
         {
-            match file_parser::parse_file(&path) {
-                Ok(emails) => {
-                    self.selected_file = Some(path.clone());
-                    self.file_emails = emails.clone();
-                    self.processed_emails.clear();
-                    self.results.clear();
-                    self.success_count = 0;
-                    self.failed_count = 0;
-                    self.progress = 0.0;
-                    self.log_messages.push(LogMessage {
-                        level: LogLevel::Success,
-                        message: format!("成功加载文件: {} ({} 条记录)", path.display(), emails.len()),
-                        timestamp: chrono::Local::now(),
-                    });
-                    self.status_message = format!("已加载 {} 条记录", emails.len());
-                }
-                Err(e) => {
-                    self.log_messages.push(LogMessage {
-                        level: LogLevel::Error,
-                        message: format!("解析文件失败: {}", e),
-                        timestamp: chrono::Local::now(),
-                    });
-                    self.status_message = "文件解析失败".to_string();
-                }
+            self.load_file(path);
+        }
+    }
+
+    fn load_file(&mut self, path: PathBuf) {
+        match file_parser::parse_file(&path) {
+            Ok(emails) => {
+                self.selected_file = Some(path.clone());
+                self.file_emails = emails.clone();
+                self.processed_emails.clear();
+                self.results.clear();
+                self.success_count = 0;
+                self.failed_count = 0;
+                self.progress = 0.0;
+                self.log_messages.push(LogMessage {
+                    level: LogLevel::Success,
+                    message: format!("成功加载文件: {} ({} 条记录)", path.display(), emails.len()),
+                    timestamp: chrono::Local::now(),
+                });
+                self.status_message = format!("已加载 {} 条记录", emails.len());
+            }
+            Err(e) => {
+                self.log_messages.push(LogMessage {
+                    level: LogLevel::Error,
+                    message: format!("解析文件失败: {}", e),
+                    timestamp: chrono::Local::now(),
+                });
+                self.status_message = "文件解析失败".to_string();
             }
         }
     }
@@ -414,6 +434,28 @@ impl eframe::App for IntercomTagsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_progress();
 
+        // 检测是否有文件正在拖动
+        let is_dragging_file = ctx.input(|i| {
+            !i.raw.hovered_files.is_empty()
+        });
+
+        // 处理拖放的文件
+        let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
+        if !dropped_files.is_empty() && self.input_mode == InputMode::File {
+            for file in dropped_files {
+                if let Some(path) = &file.path {
+                    let extension = path.extension()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.to_lowercase());
+                    
+                    if matches!(extension.as_deref(), Some("csv") | Some("xlsx") | Some("xls")) {
+                        self.load_file(path.clone());
+                        break;
+                    }
+                }
+            }
+        }
+
         egui::SidePanel::left("left_panel")
             .default_width(380.0)
             .show(ctx, |ui| {
@@ -544,8 +586,15 @@ impl eframe::App for IntercomTagsApp {
 
                         match self.input_mode {
                             InputMode::File => {
+                                // 提示文字
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("💡 提示：可直接拖放文件到窗口").size(12.0).color(TEXT_SECONDARY));
+                                });
+                                ui.add_space(10.0);
+
                                 if ui.add(
                                     egui::Button::new(RichText::new("选择文件 (CSV/XLSX)").size(14.0))
+                                        .fill(Color32::WHITE)
                                         .stroke(Stroke::new(2.0, PRIMARY_COLOR))
                                         .corner_radius(CornerRadius::same(8))
                                         .min_size(Vec2::new(ui.available_width(), 44.0))
@@ -555,16 +604,19 @@ impl eframe::App for IntercomTagsApp {
 
                                 if let Some(path) = &self.selected_file {
                                     ui.add_space(10.0);
-                                    ui.group(|ui| {
-                                        ui.set_min_width(ui.available_width());
-                                        ui.horizontal(|ui| {
-                                            ui.label(RichText::new("[文件]").size(13.0));
-                                            ui.vertical(|ui| {
-                                                ui.label(RichText::new(path.file_name().unwrap_or_default().to_string_lossy().to_string()).size(13.0).strong());
-                                                ui.label(RichText::new(format!("{} 条记录", self.file_emails.len())).size(11.0).color(SUCCESS_COLOR));
+                                    egui::Frame::NONE
+                                        .fill(Color32::from_rgb(240, 253, 244))
+                                        .corner_radius(CornerRadius::same(8))
+                                        .inner_margin(egui::vec2(12.0, 12.0))
+                                        .show(ui, |ui| {
+                                            ui.horizontal(|ui| {
+                                                ui.label(RichText::new("✅").size(18.0));
+                                                ui.vertical(|ui| {
+                                                    ui.label(RichText::new(path.file_name().unwrap_or_default().to_string_lossy().to_string()).size(13.0).strong());
+                                                    ui.label(RichText::new(format!("{} 条记录", self.file_emails.len())).size(11.0).color(SUCCESS_COLOR));
+                                                });
                                             });
                                         });
-                                    });
                                 }
                             }
                             InputMode::Manual => {
@@ -591,22 +643,65 @@ impl eframe::App for IntercomTagsApp {
 
                     ui.add_space(20.0);
 
+                    // 计算剩余数量
+                    let total = match self.input_mode {
+                        InputMode::File => self.file_emails.len(),
+                        InputMode::Manual => self.parse_manual_emails().len(),
+                    };
+                    let remaining = total.saturating_sub(self.processed_emails.len());
+                    let has_remaining = remaining > 0;
+
                     if self.is_running {
+                        // 执行中：显示停止按钮
                         if ui.add(
-                            egui::Button::new(RichText::new("停止执行").size(16.0).strong())
+                            egui::Button::new(RichText::new("⏸  停止执行").size(16.0).strong())
                                 .fill(ERROR_COLOR)
                                 .corner_radius(CornerRadius::same(10))
                                 .min_size(Vec2::new(ui.available_width(), 48.0))
                         ).clicked() {
                             self.pending_commands.push(UiCommand::StopExecution);
                         }
+                    } else if has_remaining && !self.processed_emails.is_empty() {
+                        // 已暂停且有剩余：显示继续执行按钮
+                        egui::Frame::NONE
+                            .fill(Color32::from_rgb(254, 243, 199))
+                            .corner_radius(CornerRadius::same(8))
+                            .inner_margin(egui::vec2(12.0, 8.0))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("⏸").size(14.0));
+                                    ui.label(RichText::new(format!("已暂停，剩余 {} 条待处理", remaining)).size(13.0).color(WARNING_COLOR));
+                                });
+                            });
+                        ui.add_space(10.0);
+                        
+                        if ui.add(
+                            egui::Button::new(RichText::new("▶  继续执行").size(16.0).strong())
+                                .fill(WARNING_COLOR)
+                                .corner_radius(CornerRadius::same(10))
+                                .min_size(Vec2::new(ui.available_width(), 48.0))
+                        ).clicked() {
+                            self.pending_commands.push(UiCommand::StartExecution);
+                        }
+                        
+                        // 重置按钮
+                        ui.add_space(8.0);
+                        if ui.add(
+                            egui::Button::new(RichText::new("🔄 重置").size(14.0))
+                                .fill(Color32::from_rgb(229, 231, 235))
+                                .corner_radius(CornerRadius::same(8))
+                                .min_size(Vec2::new(ui.available_width(), 36.0))
+                        ).clicked() {
+                            self.pending_commands.push(UiCommand::ResetExecution);
+                        }
                     } else {
+                        // 未开始或已完成：显示开始执行按钮
                         let can_start = self.can_start();
                         let button_color = if can_start { PRIMARY_COLOR } else { Color32::from_rgb(209, 213, 219) };
                         
                         ui.add_enabled_ui(can_start, |ui| {
                             if ui.add(
-                                egui::Button::new(RichText::new("开始执行").size(16.0).strong())
+                                egui::Button::new(RichText::new("▶  开始执行").size(16.0).strong())
                                     .fill(button_color)
                                     .corner_radius(CornerRadius::same(10))
                                     .min_size(Vec2::new(ui.available_width(), 48.0))
@@ -626,32 +721,84 @@ impl eframe::App for IntercomTagsApp {
                 .show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     
+                    // 计算总数和剩余数
+                    let total = match self.input_mode {
+                        InputMode::File => self.file_emails.len(),
+                        InputMode::Manual => self.parse_manual_emails().len(),
+                    };
+                    let processed = self.processed_emails.len();
+                    let remaining = total.saturating_sub(processed);
+                    
+                    // 状态消息
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&self.status_message).size(15.0).strong());
                         if self.is_running {
                             ui.spinner();
                         }
+                    });
+                    
+                    ui.add_space(12.0);
+                    
+                    // 统计卡片
+                    ui.horizontal(|ui| {
+                        // 进度卡片
+                        if processed > 0 || total > 0 {
+                            egui::Frame::NONE
+                                .fill(Color32::from_rgb(239, 246, 255))
+                                .corner_radius(CornerRadius::same(8))
+                                .inner_margin(egui::vec2(12.0, 8.0))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new("已处理").size(12.0).color(TEXT_SECONDARY));
+                                        ui.label(RichText::new(format!("{}", processed)).size(16.0).strong().color(PRIMARY_COLOR));
+                                        ui.label(RichText::new("/").size(14.0).color(TEXT_SECONDARY));
+                                        ui.label(RichText::new(format!("{}", total)).size(16.0).strong().color(PRIMARY_COLOR));
+                                    });
+                                });
+                            ui.add_space(8.0);
+                        }
+                        
+                        // 剩余卡片
+                        if remaining > 0 {
+                            egui::Frame::NONE
+                                .fill(Color32::from_rgb(255, 251, 235))
+                                .corner_radius(CornerRadius::same(8))
+                                .inner_margin(egui::vec2(12.0, 8.0))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new("剩余").size(12.0).color(TEXT_SECONDARY));
+                                        ui.label(RichText::new(format!("{}", remaining)).size(16.0).strong().color(WARNING_COLOR));
+                                    });
+                                });
+                            ui.add_space(8.0);
+                        }
                         
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.horizontal(|ui| {
-                                egui::Frame::NONE
-                                    .fill(Color32::from_rgb(254, 226, 226))
-                                    .corner_radius(CornerRadius::same(16))
-                                    .inner_margin(8.0)
-                                    .show(ui, |ui| {
-                                        ui.label(RichText::new(format!("失败 {}", self.failed_count)).size(14.0).strong().color(ERROR_COLOR));
+                            // 失败
+                            egui::Frame::NONE
+                                .fill(Color32::from_rgb(254, 226, 226))
+                                .corner_radius(CornerRadius::same(8))
+                                .inner_margin(egui::vec2(12.0, 8.0))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new("失败").size(12.0).color(TEXT_SECONDARY));
+                                        ui.label(RichText::new(format!("{}", self.failed_count)).size(16.0).strong().color(ERROR_COLOR));
                                     });
-                                
-                                ui.add_space(10.0);
-                                
-                                egui::Frame::NONE
-                                    .fill(Color32::from_rgb(220, 252, 231))
-                                    .corner_radius(CornerRadius::same(16))
-                                    .inner_margin(8.0)
-                                    .show(ui, |ui| {
-                                        ui.label(RichText::new(format!("成功 {}", self.success_count)).size(14.0).strong().color(SUCCESS_COLOR));
+                                });
+                            
+                            ui.add_space(8.0);
+                            
+                            // 成功
+                            egui::Frame::NONE
+                                .fill(Color32::from_rgb(220, 252, 231))
+                                .corner_radius(CornerRadius::same(8))
+                                .inner_margin(egui::vec2(12.0, 8.0))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new("成功").size(12.0).color(TEXT_SECONDARY));
+                                        ui.label(RichText::new(format!("{}", self.success_count)).size(16.0).strong().color(SUCCESS_COLOR));
                                     });
-                            });
+                                });
                         });
                     });
 
@@ -728,6 +875,42 @@ impl eframe::App for IntercomTagsApp {
 
         if self.is_running {
             ctx.request_repaint();
+        }
+
+        // 拖放文件时的覆盖层提示
+        if is_dragging_file && self.input_mode == InputMode::File {
+            #[allow(deprecated)]
+            let screen_rect = ctx.input(|i| i.screen_rect());
+            egui::Area::new(egui::Id::new("drop_overlay"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(screen_rect.min)
+                .show(ctx, |ui| {
+                    let (rect, _) = ui.allocate_exact_size(screen_rect.size(), egui::Sense::hover());
+                    
+                    // 半透明背景
+                    ui.painter().rect_filled(
+                        rect,
+                        12.0,
+                        Color32::from_rgba_unmultiplied(99, 102, 241, 50),
+                    );
+                    
+                    // 边框
+                    ui.painter().rect_stroke(
+                        rect.shrink(4.0),
+                        12.0,
+                        Stroke::new(4.0, PRIMARY_COLOR),
+                        egui::StrokeKind::Outside,
+                    );
+                    
+                    // 居中文字
+                    ui.vertical_centered(|ui| {
+                        ui.allocate_space(egui::vec2(0.0, rect.height() / 2.0 - 60.0));
+                        ui.label(RichText::new("📁").size(48.0));
+                        ui.add_space(16.0);
+                        ui.label(RichText::new("释放文件以导入").size(24.0).strong().color(PRIMARY_COLOR));
+                        ui.label(RichText::new("支持 CSV、XLSX 格式").size(14.0).color(TEXT_SECONDARY));
+                    });
+                });
         }
 
         self.apply_pending();
