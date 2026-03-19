@@ -9,7 +9,7 @@ set -e
 APP_NAME="Intercom Tags Manager"
 EXECUTABLE_NAME="intercomtags"
 BUNDLE_ID="com.intercomtags.app"
-VERSION="${1:-0.1.0}"
+VERSION="${1:-0.1.1}"
 
 # 路径
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -195,6 +195,25 @@ echo "📌 提示: 如果图标未立即显示，请运行以下命令刷新 Fin
 echo "   killall Finder"
 echo "   或"
 echo "   rm -rf /var/folders/*/*/com.apple.dock.iconcache; killall Dock"
+
+# ==================== 签名应用 ====================
+echo ""
+echo "[6/6] 签名应用..."
+
+# 检查是否有签名身份
+SIGN_IDENTITY=$(security find-identity -v -p codesigning | head -1 | awk -F'"' '{print $2}')
+
+if [ -n "${SIGN_IDENTITY}" ]; then
+    echo "发现签名身份: ${SIGN_IDENTITY}"
+    codesign --force --deep --sign "${SIGN_IDENTITY}" "${APP_DIR}"
+    echo "✅ 应用已签名"
+else
+    echo "⚠️ 未发现代码签名身份，应用未签名"
+    echo ""
+    echo "📌 用户首次运行需要执行以下命令："
+    echo "   xattr -cr \"/Applications/Intercom Tags Manager.app\""
+    echo "   或右键点击应用选择"打开""
+fi
 
 # ==================== 完成 ====================
 echo ""

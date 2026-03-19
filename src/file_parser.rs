@@ -30,6 +30,9 @@ fn parse_csv(path: &Path) -> Result<Vec<EmailWithTag>> {
         .from_reader(content.as_bytes());
 
     let mut results = Vec::new();
+    let mut email_col: Option<usize> = None;
+    let mut tag_col: Option<usize> = None;
+    let mut first_row = true;
     
     for result in reader.records() {
         let record = result.context("解析CSV记录失败")?;
@@ -38,17 +41,40 @@ fn parse_csv(path: &Path) -> Result<Vec<EmailWithTag>> {
             continue;
         }
 
-        let email = record.get(0).unwrap_or("").trim().to_string();
-        
-        if is_header_row(&email) {
-            continue;
+        // 解析标题行，识别邮箱列和标签列
+        if first_row {
+            first_row = false;
+            for (i, field) in record.iter().enumerate() {
+                let header = field.trim().to_lowercase();
+                if is_email_header(&header) {
+                    email_col = Some(i);
+                } else if is_tag_header(&header) {
+                    tag_col = Some(i);
+                }
+            }
+            
+            // 如果识别到邮箱列，跳过标题行继续处理
+            if email_col.is_some() {
+                continue;
+            }
+            // 否则默认第一列是邮箱，第二列是标签
+            email_col = Some(0);
+            tag_col = Some(1);
         }
+
+        let email = record.get(email_col.unwrap_or(0))
+            .unwrap_or("")
+            .trim()
+            .to_string();
 
         if !is_valid_email(&email) {
             continue;
         }
 
-        let tag = record.get(1).map(|s| s.trim().to_string());
+        let tag = tag_col.and_then(|col| {
+            let t = record.get(col).map(|s| s.trim().to_string()).unwrap_or_default();
+            if t.is_empty() { None } else { Some(t) }
+        });
         
         results.push(EmailWithTag { email, tag });
     }
@@ -68,24 +94,49 @@ fn parse_xlsx(path: &Path) -> Result<Vec<EmailWithTag>> {
         .context("无法读取工作表")?;
 
     let mut results = Vec::new();
+    let mut email_col: Option<usize> = None;
+    let mut tag_col: Option<usize> = None;
+    let mut first_row = true;
 
     for row in range.rows() {
         if row.is_empty() {
             continue;
         }
 
-        let email = get_cell_value(row, 0);
-        
-        if is_header_row(&email) {
-            continue;
+        // 解析标题行，识别邮箱列和标签列
+        if first_row {
+            first_row = false;
+            for (i, cell) in row.iter().enumerate() {
+                let header = match cell {
+                    Data::String(s) => s.trim().to_lowercase(),
+                    _ => String::new(),
+                };
+                if is_email_header(&header) {
+                    email_col = Some(i);
+                } else if is_tag_header(&header) {
+                    tag_col = Some(i);
+                }
+            }
+            
+            // 如果识别到邮箱列，跳过标题行继续处理
+            if email_col.is_some() {
+                continue;
+            }
+            // 否则默认第一列是邮箱，第二列是标签
+            email_col = Some(0);
+            tag_col = Some(1);
         }
+
+        let email = get_cell_value(row, email_col.unwrap_or(0));
 
         if !is_valid_email(&email) {
             continue;
         }
 
-        let tag = get_cell_value(row, 1);
-        let tag = if tag.is_empty() { None } else { Some(tag) };
+        let tag = tag_col.and_then(|col| {
+            let t = get_cell_value(row, col);
+            if t.is_empty() { None } else { Some(t) }
+        });
         
         results.push(EmailWithTag { email, tag });
     }
@@ -104,14 +155,31 @@ fn get_cell_value(row: &[Data], col: usize) -> String {
         .unwrap_or_default()
 }
 
-fn is_header_row(email: &str) -> bool {
-    let lower = email.to_lowercase();
+fn is_email_header(header: &str) -> bool {
     let headers = [
-        "email", "邮箱", "e-mail", "mail", "地址",
-        "email address", "电子邮件", "email_address",
+        // 英文
+        "email", "emails", "e-mail", "e_mail",
+        "mail", "mailbox", "email_address", "emailaddress",
+        // 中文
+        "邮箱", "电子邮件", "电子邮箱", "邮件地址",
+        "联系邮箱", "用户邮箱", "客户邮箱",
+        // 常见变体
+        "用户邮箱", "账号", "账号邮箱", "账户", "登录邮箱",
+        "email地址", "邮箱地址",
     ];
-    
-    headers.iter().any(|h| lower == *h)
+    headers.iter().any(|h| header == *h)
+}
+
+fn is_tag_header(header: &str) -> bool {
+    let headers = [
+        // 英文
+        "tag", "tags", "label", "labels",
+        // 中文
+        "标签", "标记", "分类",
+        // 常见变体
+        "客户标签", "用户标签", "备注标签", "tag标签",
+    ];
+    headers.iter().any(|h| header == *h)
 }
 
 fn is_valid_email(email: &str) -> bool {

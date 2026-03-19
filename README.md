@@ -14,9 +14,20 @@
 1. 下载 `Intercom Tags Manager-x.x.x.dmg`
 2. 双击打开 DMG 文件
 3. 将应用拖拽到 `Applications` 文件夹
-4. 从启动台打开应用
+4. **首次打开需移除隔离属性**（见下方说明）
 
-> ⚠️ 首次打开可能需要在"系统偏好设置 > 安全性与隐私"中允许运行
+> ⚠️ 由于应用未签名，macOS 会显示"已损坏"警告，需要执行以下命令：
+
+```bash
+# 移除隔离属性
+xattr -cr /Applications/Intercom\ Tags\ Manager.app
+```
+
+或使用右键方式：
+1. 右键点击应用 → 选择"打开"
+2. 在弹出对话框中点击"打开"确认
+
+> 📌 这是因为应用没有 Apple 开发者签名，macOS Gatekeeper 会阻止运行。
 
 ### 从源码构建
 
